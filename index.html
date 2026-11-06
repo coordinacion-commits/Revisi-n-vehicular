@@ -2,86 +2,153 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Prueba de conexión · Revisiones Fucesa</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Revisión vehicular · Fucesa</title>
+<meta name="theme-color" content="#2f4458">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Revisión">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
-  body{font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;padding:16px;color:#1b2430;background:#f3f5f8}
-  h1{font-size:20px;color:#1F4E79;margin:0 0 4px}
-  p{color:#555;font-size:14px}
-  label{display:block;font-weight:bold;font-size:13px;margin:14px 0 4px}
-  input{width:100%;box-sizing:border-box;padding:10px;font-size:14px;border:1px solid #c5ccd6;border-radius:6px}
-  button{margin-top:12px;padding:12px 16px;font-size:15px;font-weight:bold;border:0;border-radius:6px;background:#1F4E79;color:#fff;cursor:pointer;width:100%}
-  .r{margin-top:10px;padding:10px;border-radius:6px;font-size:13px;white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid #c5ccd6;min-height:20px}
-  .ok{border-color:#2e7d32;background:#edf7ee}
-  .bad{border-color:#c62828;background:#fdecea}
+/* Diseño de la revisión: rail de pasos arriba, una sección por pantalla, barra de acciones abajo. */
+:root{
+  --bg:#eef1f4; --card:#ffffff; --ink:#18212c; --muted:#5b6876; --line:#d3d9e0;
+  --accent:#d9561f; --accent-ink:#ffffff; --steel:#2f4458;
+  --ok:#2e7d4f; --warn:#b7791f; --bad:#c0392b;
+  --body-fill:#f6f8fa; --glass:#cfdbe6; --tire:#2a2f36;
+  --f-display:"Barlow Condensed","Roboto Condensed","Arial Narrow","Helvetica Neue",Arial,sans-serif;
+  --f-body:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  --f-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#12171d; --card:#1b232c; --ink:#e6ebf0; --muted:#97a4b2; --line:#2f3b47;
+  --accent:#f07a41; --accent-ink:#1a0d05; --steel:#9db4ca;
+  --ok:#5cbf86; --warn:#e0a948; --bad:#ef6f61;
+  --body-fill:#24303c; --glass:#3c5468; --tire:#0b0e12; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.45;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+.status{position:sticky;top:0;z-index:20;background:var(--steel);color:#fff;font-size:.82rem;padding:calc(6px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) 6px max(12px,env(safe-area-inset-left,0px));display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+@media (prefers-color-scheme:dark){.status{background:#24303c}}
+.status .dot{width:9px;height:9px;border-radius:50%;background:#9aa6b2;flex:none}
+.status .dot.on{background:#5cd18b}.status .dot.off{background:#ff8a7a}
+.status .sp{flex:1}
+.status b{font-weight:600}
+.wrap{max-width:760px;margin:0 auto;padding:14px max(16px,env(safe-area-inset-right,0px)) 120px max(16px,env(safe-area-inset-left,0px))}
+h1{font-family:var(--f-display);font-weight:700;font-size:1.9rem;line-height:1.05;margin:4px 0 2px;text-transform:uppercase;letter-spacing:.01em}
+h2{font-family:var(--f-display);font-weight:700;font-size:1.45rem;margin:0 0 4px;text-transform:uppercase;letter-spacing:.02em}
+h3{font-family:var(--f-display);font-weight:700;font-size:1.1rem;margin:0;text-transform:uppercase;letter-spacing:.03em}
+.lead{color:var(--muted);margin:0 0 14px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.stack{display:flex;flex-direction:column;gap:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;min-width:0}
+input[type=text],input[type=number],input[type=password],select,textarea{font:400 16px var(--f-body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:11px 10px;width:100%;text-transform:none;letter-spacing:0}
+textarea{min-height:70px;resize:vertical}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--ink);font:700 1rem var(--f-display);text-transform:uppercase;letter-spacing:.05em;padding:13px 16px;border-radius:10px;cursor:pointer;min-height:48px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.big{font-size:1.25rem;padding:18px;width:100%}
+.btn.small{min-height:36px;padding:7px 12px;font-size:.85rem}
+.btn:disabled{opacity:.5}
+.linkbtn{border:0;background:none;color:var(--accent);font:600 .9rem var(--f-body);cursor:pointer;padding:6px 4px}
+.rail{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:12px;scrollbar-width:none}
+.rail::-webkit-scrollbar{display:none}
+.rail button{flex:0 0 auto;border:1px solid var(--line);background:var(--card);color:var(--muted);font:600 .82rem var(--f-body);padding:7px 11px;border-radius:999px;cursor:pointer;display:flex;gap:6px;align-items:center}
+.rail button .n{font-family:var(--f-mono);font-size:.75rem}
+.rail button[aria-current="step"]{border-color:var(--accent);color:var(--ink);background:color-mix(in srgb,var(--accent) 10%,var(--card))}
+.rail button.err .n{color:var(--bad)}
+.seg{display:flex;gap:4px;flex-wrap:wrap}
+.seg button{border:1px solid var(--line);background:var(--bg);color:var(--ink);font:600 .92rem var(--f-body);padding:9px 13px;border-radius:8px;cursor:pointer;min-width:48px;min-height:42px}
+.seg button[aria-pressed="true"]{background:var(--steel);border-color:var(--steel);color:var(--bg)}
+.seg button.ok[aria-pressed="true"]{background:var(--ok);border-color:var(--ok);color:#fff}
+.seg button.warn[aria-pressed="true"]{background:var(--warn);border-color:var(--warn);color:#fff}
+.seg button.bad[aria-pressed="true"]{background:var(--bad);border-color:var(--bad);color:#fff}
+.fuel{display:flex;gap:4px}.fuel button{flex:1;font-family:var(--f-mono)}
+.mov{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mov button{border:2px solid var(--line);background:var(--bg);color:var(--ink);border-radius:12px;padding:16px 12px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:2px}
+.mov button b{font-family:var(--f-display);font-size:1.5rem;text-transform:uppercase;letter-spacing:.03em}
+.mov button span{font-size:.85rem;color:var(--muted)}
+.mov button[aria-pressed="true"]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--card))}
+.units{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+.unit{border:1.5px solid var(--line);background:var(--bg);color:var(--ink);border-radius:10px;padding:12px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:3px;font:inherit;min-width:0}
+.unit b{font-family:var(--f-display);font-size:1.25rem;text-transform:uppercase;letter-spacing:.03em}
+.unit .pl{font-family:var(--f-mono);font-size:.85rem}
+.unit .sub{font-size:.8rem;color:var(--muted)}
+.unit[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.st{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;align-self:flex-start;padding:2px 8px;border-radius:999px}
+.st.ruta{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
+.st.disp{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+.st.pend{background:color-mix(in srgb,var(--steel) 18%,transparent);color:var(--steel)}
+.info{border-left:4px solid var(--steel);background:var(--bg);padding:10px 12px;border-radius:0 8px 8px 0;font-size:.92rem}
+.warnbox{border-left:4px solid var(--warn);background:color-mix(in srgb,var(--warn) 10%,var(--card));padding:10px 12px;border-radius:0 8px 8px 0;font-size:.92rem}
+.errbox{border-left:4px solid var(--bad);background:color-mix(in srgb,var(--bad) 8%,var(--card));padding:10px 12px;border-radius:0 8px 8px 0;font-size:.92rem}
+.dmg-tools{display:flex;gap:8px;flex-wrap:wrap}
+.dmg-tools .btn{min-height:40px;padding:8px 11px;font-size:.82rem;display:flex;gap:6px;align-items:center}
+.dot2{width:12px;height:12px;border-radius:50%;display:inline-block}
+.views{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}
+.view{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);min-width:0}
+.view h3{font-size:.9rem;color:var(--muted);margin-bottom:4px;display:flex;justify-content:space-between}
+.view svg{width:100%;height:auto;display:block;touch-action:manipulation;cursor:crosshair}
+.dmg-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
+.dmg-list li{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px}
+.badge{font-family:var(--f-mono);font-size:.8rem;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:#fff}
+.x{border:0;background:none;color:var(--muted);font-size:1.4rem;cursor:pointer;padding:4px 10px}
+.tires{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.tire{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:10px;min-width:0}
+.tire header{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.tire .pos{font-family:var(--f-mono);font-size:.78rem;color:var(--muted)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.group-t{font-family:var(--f-display);text-transform:uppercase;letter-spacing:.06em;color:var(--accent);font-weight:700;margin:16px 0 0;font-size:1rem}
+.q{padding:12px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.q:last-child{border-bottom:0}
+.q .qt{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.q .qt span{font-weight:500}
+.q.missing{background:color-mix(in srgb,var(--bad) 7%,transparent);border-radius:8px;padding-inline:8px}
+.req{color:var(--bad);font-weight:700}
+.list{display:flex;flex-direction:column;gap:8px}
+.row{display:grid;grid-template-columns:1fr auto;gap:4px 12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;text-align:left;font:inherit;color:inherit;width:100%}
+.row b{font-family:var(--f-display);font-size:1.15rem;text-transform:uppercase;letter-spacing:.03em}
+.row .meta{color:var(--muted);font-size:.84rem;grid-column:1/-1}
+.row .acts{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.empty{text-align:center;color:var(--muted);padding:22px 12px;background:var(--card);border:1px dashed var(--line);border-radius:12px}
+.soon{border:1.5px dashed var(--line);border-radius:10px;padding:18px;color:var(--muted);text-align:center;background:var(--bg)}
+.faltas{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.faltas button{width:100%;text-align:left;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;padding:10px 12px;font:500 .95rem var(--f-body);cursor:pointer;display:flex;justify-content:space-between;gap:8px}
+.faltas button::after{content:"Ir ›";color:var(--accent);font-weight:700;flex:none}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:10px max(16px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));z-index:15}
+.bar .in{max-width:760px;margin:0 auto;display:flex;gap:10px;align-items:center}
+.bar .in .btn.primary{flex:1}
+.saved{font-size:.75rem;color:var(--muted);text-align:center;margin-top:6px}
+.banner{background:var(--accent);color:var(--accent-ink);padding:10px max(16px,env(safe-area-inset-left,0px));display:flex;gap:10px;align-items:center;justify-content:space-between;font-weight:600}
+.banner .btn{min-height:38px;padding:6px 12px;background:var(--card);color:var(--ink);border-color:var(--card)}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 14px;margin:0}
+.kv div{display:flex;flex-direction:column;min-width:0}
+.kv dt{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+.kv dd{margin:0;font-weight:500;overflow-wrap:anywhere}
+.ref{font-family:var(--f-mono);font-size:1.6rem;color:var(--accent);letter-spacing:.06em}
+.foot{color:var(--muted);font-size:.78rem;text-align:center;margin-top:22px}
+@media (prefers-reduced-motion:no-preference){.panel{animation:in .16s ease-out}@keyframes in{from{transform:translateY(4px)}to{transform:none}}}
 </style>
 </head>
 <body>
-<h1>Prueba de conexión</h1>
-<p>Pega la URL de la aplicación web y el token (menú Revisiones &gt; Ver URL de la app y token). Pulsa las tres pruebas en orden.</p>
-
-<label for="url">URL de la aplicación web (termina en /exec)</label>
-<input id="url" placeholder="https://script.google.com/macros/s/.../exec">
-<label for="token">Token</label>
-<input id="token" placeholder="Token de 24 caracteres">
-
-<button id="b1">1. Prueba de vida (GET sin token)</button>
-<div class="r" id="r1"></div>
-<button id="b2">2. Leer catálogos (GET con token)</button>
-<div class="r" id="r2"></div>
-<button id="b3">3. Enviar datos (POST text/plain)</button>
-<div class="r" id="r3"></div>
-
-<script>
-function uuid(){return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&3|8)).toString(16);});}
-function url(){return document.getElementById('url').value.trim().replace(/[?#].*$/,'').replace(/\/+$/,'');}
-function tok(){return document.getElementById('token').value.trim();}
-function show(id,ok,txt){const el=document.getElementById(id);el.className='r '+(ok?'ok':'bad');el.textContent=txt;}
-async function run(id,fn){
-  show(id,true,'Probando…');
-  const u=url();
-  if(!u){show(id,false,'La casilla de la URL está vacía. Pega ahí la URL que muestra el menú Revisiones > Ver URL de la app y token.');return;}
-  if(/googleusercontent\.com/.test(u)){show(id,false,'Esa es la dirección a la que Google te redirige, no la URL de la app. Copia la URL desde el menú Revisiones > Ver URL de la app y token. Empieza con https://script.google.com/');return;}
-  if(/\/dev$/.test(u)){show(id,false,'Esa URL termina en /dev (es la de pruebas del editor). Usa la que termina en /exec.');return;}
-  if(!/^https:\/\/script\.google\.com\/.+\/exec$/.test(u)){show(id,false,'La URL debe empezar con https://script.google.com/ y terminar en /exec.\n\nLo que pegaste:\n'+u);return;}
-  const t0=Date.now();
-  try{
-    const res=await fn();
-    const txt=await res.text();
-    let j;try{j=JSON.parse(txt);}catch(e){show(id,false,'La respuesta no es JSON. Lo más probable: la implementación no tiene acceso "Cualquier usuario" o pide iniciar sesión.\n\nPrimeros caracteres:\n'+txt.slice(0,300));return;}
-    show(id,!!j.ok,(j.ok?'CORRECTO':'RESPONDIÓ CON ERROR')+' en '+(Date.now()-t0)+' ms\n\n'+JSON.stringify(j,null,2).slice(0,1500));
-  }catch(e){
-    show(id,false,'FALLÓ: '+e.message+'\n\nRevisando la causa…');
-    show(id,false,'FALLÓ: '+e.message+'\n\n'+await diagnostico(u));
-  }
-}
-async function probar(u){
-  try{const r=await fetch(u+'?accion=ping');const j=JSON.parse(await r.text());return j.ok?'ok':'json';}catch(e){return 'falla';}
-}
-async function diagnostico(u){
-  const lineas=['Página abierta desde: '+location.protocol.replace(':','')];
-  let alcanzable;
-  try{await fetch(u+'?accion=ping',{mode:'no-cors'});alcanzable=true;}catch(e){alcanzable=false;}
-  lineas.push('¿El servidor responde?: '+(alcanzable?'sí':'no'));
-  const m=u.match(/^https:\/\/script\.google\.com\/a\/macros\/[^/]+\/(s\/.+\/exec)$/);
-  if(m){
-    const alt='https://script.google.com/macros/'+m[1];
-    const r=await probar(alt);
-    lineas.push('Prueba con la URL sin el dominio: '+(r==='ok'?'FUNCIONA':'también falla'));
-    if(r==='ok'){
-      lineas.push('\n✅ SOLUCIÓN: usa esta URL (sin "/a/macros/fucesa.com"):\n'+alt);
-      document.getElementById('url').value=alt;
-      return lineas.join('\n');
-    }
-  }
-  if(!alcanzable) lineas.push('\nCAUSA PROBABLE: algo en esta computadora bloquea la conexión con Google (antivirus, extensión del navegador o red de la oficina). Prueba en otra red, por ejemplo con los datos del celular compartidos, o en otro navegador.');
-  else lineas.push('\nCAUSA PROBABLE: Google responde, pero pide iniciar sesión antes de entregar la respuesta, así que el navegador la bloquea. Revisa en Implementar > Gestionar implementaciones que "Quién tiene acceso" diga "Cualquier usuario".');
-  return lineas.join('\n');
-}
-document.getElementById('b1').onclick=()=>run('r1',()=>fetch(url()+'?accion=ping'));
-document.getElementById('b2').onclick=()=>run('r2',()=>fetch(url()+'?accion=catalogos&token='+encodeURIComponent(tok())));
-document.getElementById('b3').onclick=()=>run('r3',()=>fetch(url(),{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({accion:'ping',token:tok(),uuid:uuid()})}));
-</script>
+<div id="banner"></div>
+<div class="status" id="status" role="status" aria-live="polite">
+  <span class="dot" id="stDot"></span><b id="stNet">Revisando conexión…</b>
+  <span id="stCat"></span><span class="sp"></span><span id="stPend"></span>
+</div>
+<div class="wrap"><main id="app"><div class="empty">Cargando…</div></main></div>
+<div class="bar" id="bar" hidden><div class="in">
+  <button class="btn" id="prev" type="button">Atrás</button>
+  <button class="btn primary" id="next" type="button">Siguiente</button>
+</div><div class="saved" id="saved"></div></div>
+<input type="file" id="qrFile" accept="image/*" capture="environment" hidden>
+<script src="config.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
-
