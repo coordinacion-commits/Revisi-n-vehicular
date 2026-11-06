@@ -2,7 +2,7 @@
 // Guarda la app en el teléfono para que abra sin señal.
 // Al publicar una versión nueva, cambia VERSION: la app avisa y se actualiza
 // sin tocar borradores ni pendientes (esos viven en IndexedDB, no aquí).
-const VERSION = 'v2.0.0';
+const VERSION = 'v3.0.0';
 const CACHE_APP = 'app-' + VERSION;
 const CACHE_LIB = 'libs-v1';
 

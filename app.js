@@ -1,9 +1,10 @@
-// ─── REVISIÓN VEHICULAR FUCESA · app.js (FASE 2: captura sin conexión) ─────
+// ─── REVISIÓN VEHICULAR FUCESA · app.js (FASE 3: + fotos y firmas) ─────────
 // Todo se guarda en IndexedDB del teléfono. Nada se borra hasta que el
 // servidor confirme (envío en la Fase 4).
 'use strict';
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '3.0.0';
+const FOTO_MAX_PX = 1600, FOTO_CALIDAD = 0.72;   // ~250–400 KB por foto
 const CFG = window.APP_CONFIG || {};
 const SCRIPT_URL = String(CFG.SCRIPT_URL || '').trim();
 
@@ -257,8 +258,8 @@ function nuevaRevision(placas) {
     km: '', combustible: '', conductor: '', destino: '', salida: null, kmConfirmado: false,
     danos: [], dmgType: 'golpe',
     llantas: Object.fromEntries(TIRES.map(t => [t.k, { estado: '', mm: '', psi: '' }])),
-    plantilla, respuestas: {}, obs: '',
-    firmas: { entrega: { nombre: '' }, recibe: { nombre: '' } }
+    plantilla, respuestas: {}, obs: '', fotos: {},
+    firmas: { entrega: { nombre: '', archivo: null, fecha: null, rol: '' }, recibe: { nombre: '', archivo: null, fecha: null, rol: '' } }
   };
   const ultimo = S._ultimoRevisor; if (ultimo && (c.personal || []).includes(ultimo)) R.revisor = ultimo;
   S.R = R; S.paso = 0; S.intento = false; S.vista = 'captura';
@@ -351,8 +352,13 @@ function validar(R) {
     if (q.obligatoria && vacio) F(3, 'q-' + q.id, q.pregunta);
     else if (a.valor === 'Falla' && !String(a.comentario || '').trim()) F(3, 'q-' + q.id, 'Comentario de la falla: ' + q.pregunta);
   });
-  if (!R.firmas.entrega.nombre.trim()) F(5, 'f-entrega', 'Nombre de quien entrega');
-  if (!R.firmas.recibe.nombre.trim()) F(5, 'f-recibe', 'Nombre de quien recibe');
+  R.plantilla.forEach(q => { if (q.exigeFoto && !nFotos(R, 'q:' + q.id)) F(3, 'q-' + q.id, 'Foto requerida: ' + q.pregunta); });
+  PHOTOS.forEach(([k, l]) => { if (!nFotos(R, 'fijo:' + k)) F(4, 'ph-fijo-' + k, 'Foto: ' + l); });
+  ['entrega', 'recibe'].forEach(k => {
+    const t = k === 'entrega' ? 'quien entrega' : 'quien recibe', f = R.firmas[k];
+    if (!f.nombre.trim()) F(5, 'f-' + k, 'Nombre de ' + t);
+    if (!f.archivo) F(5, 'f-' + k, 'Firma de ' + t);
+  });
   return { faltas, avisos };
 }
 
@@ -369,6 +375,8 @@ function render() {
   else if (S.vista === 'captura') h = vistaCaptura();
   $('#app').innerHTML = h;
   if (S.vista === 'captura') pintarBarra();
+  pintarMiniaturas();
+  if (S.vista === 'captura' && S.paso === 5) iniciarFirmas();
 }
 function tecleando() { const a = document.activeElement; return a && /INPUT|TEXTAREA|SELECT/.test(a.tagName); }
 
@@ -418,6 +426,7 @@ function vistaDetalle(p) {
   <h1 style="margin-top:10px">${esc(p.movimiento)} · ${esc(nombreUnidad(p.unidad))}</h1>
   <p class="lead">Ref. provisional <span class="mono">${refCorta(p.uuid)}</span> · capturada ${fmtFecha(p.fechaFin)}</p>
   <div class="stack"><section class="panel"><dl class="kv">${[['Placas', p.placas], ['Kilometraje', fmtKm(p.km)], ['Combustible', p.combustible], ['Conductor', p.conductor], ['Destino', p.destino], ['Revisó', p.revisor], ['Entrega', p.firmas.entrega.nombre], ['Recibe', p.firmas.recibe.nombre]].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v || '—')}</dd></div>`).join('')}</dl></section>
+  <section class="panel"><h3>Evidencias</h3><p style="margin:6px 0 0">${totalFotos(p)} foto(s) · firmas: ${['entrega', 'recibe'].map(k => p.firmas[k].archivo ? esc(p.firmas[k].nombre) : 'falta').join(' y ')}</p></section>
   <section class="panel"><h3>Hallazgos</h3><p style="margin:6px 0 0">${p.danos.length} daño(s) marcados · ${fallas.length} falla(s)${fallas.length ? ': ' + esc(fallas.map(q => q.pregunta).join(', ')) : ''} · llantas en mal estado: ${TIRES.filter(t => p.llantas[t.k].estado === 'Malo').map(t => t.t).join(', ') || 'ninguna'}</p></section></div>`;
 }
 
@@ -509,7 +518,8 @@ function pasoLlantas(R, v) {
   <div class="tires">${TIRES.map(t => { const L = R.llantas[t.k]; return `<div class="tire" id="t-${t.k}"${miss(v, 't-' + t.k)}><header><h3>${t.t} *</h3><span class="pos">${t.p}</span></header>
     ${seg('tire:' + t.k, [['Bueno', 'Bueno', 'ok'], ['Regular', 'Regular', 'warn'], ['Malo', 'Malo', 'bad']], L.estado)}
     <div class="row2"><label class="f">Dibujo (mm)<input type="number" step="0.1" inputmode="decimal" id="t-${t.k}-mm" data-t="${t.k}" data-tf="mm" value="${esc(L.mm)}"></label>
-    <label class="f">Presión (PSI)<input type="number" inputmode="numeric" id="t-${t.k}-psi" data-t="${t.k}" data-tf="psi" value="${esc(L.psi)}"></label></div></div>`; }).join('')}</div>`;
+    <label class="f">Presión (PSI)<input type="number" inputmode="numeric" id="t-${t.k}-psi" data-t="${t.k}" data-tf="psi" value="${esc(L.psi)}"></label></div>
+    ${fotosSlot(R, 'llanta:' + t.k, 'Foto de la llanta', { compacto: true })}</div>`; }).join('')}</div>`;
 }
 function pasoRevision(R, v) {
   if (!R.plantilla.length) return `<h2>Revisión general</h2><div class="empty">No hay preguntas en la plantilla. Conéctate para descargar las listas.</div>`;
@@ -523,22 +533,29 @@ function pasoRevision(R, v) {
     else ctl = seg('q:' + q.id, [['Bien', 'Bien', 'ok'], ['Falla', 'Falla', 'bad'], ['N/A', 'N/A']], a.valor);
     return `<div class="q${falta ? ' missing' : ''}" id="q-${q.id}"><div class="qt"><span>${esc(q.pregunta)}${q.obligatoria ? ' <span class="req">*</span>' : ''}</span>${q.tipo === 'bfn' ? ctl : ''}</div>
       ${q.tipo !== 'bfn' ? ctl : ''}
-      ${a.valor === 'Falla' ? `<input type="text" id="qc-${q.id}" data-qc="${q.id}" value="${esc(a.comentario || '')}" placeholder="¿Qué falla? (obligatorio)">` : ''}</div>`;
+      ${a.valor === 'Falla' ? `<input type="text" id="qc-${q.id}" data-qc="${q.id}" value="${esc(a.comentario || '')}" placeholder="¿Qué falla? (obligatorio)">` : ''}
+      ${q.exigeFoto || a.valor === 'Falla' || nFotos(R, 'q:' + q.id) ? fotosSlot(R, 'q:' + q.id, q.exigeFoto ? 'Foto requerida' : 'Foto de evidencia', { obligatoria: q.exigeFoto, compacto: true }) : ''}</div>`;
   }).join('')}`).join('')}</div>
   <label class="f">Observaciones generales<textarea id="in-obs" data-f="obs" placeholder="Fallas, faltantes o comentarios">${esc(R.obs)}</textarea></label>`;
 }
-function pasoFotos() {
-  return `<div><h2>Fotos de evidencia</h2><p class="lead" style="margin:0">Una por lado, el tablero con el kilometraje y la cabina.</p></div>
-  <div class="grid">${PHOTOS.map(([, l]) => `<div class="soon">${esc(l)}</div>`).join('')}</div>
-  <div class="info">La toma de fotos se activa en la siguiente fase. Puedes continuar.</div>`;
+function pasoFotos(R, v) {
+  return `<div><h2>Fotos de evidencia</h2><p class="lead" style="margin:0">Una foto por lado, el tablero con el kilometraje y la cabina. Las adicionales son para acercamientos de daños.</p></div>
+  <div class="photos-grid">${PHOTOS.map(([k, l]) => fotosSlot(R, 'fijo:' + k, l, { obligatoria: true, v })).join('')}</div>
+  ${fotosSlot(R, 'extra', 'Fotos adicionales de daños', { v })}`;
+}
+function rolesFirma(R) {
+  const salida = R.movimiento !== 'Regreso';
+  return { entrega: salida ? 'Responsable de flotilla' : 'Conductor', recibe: salida ? 'Conductor' : 'Responsable de flotilla' };
 }
 function pasoFirmas(R, v) {
-  const salida = R.movimiento !== 'Regreso';
-  const rol = { entrega: salida ? 'Responsable de flotilla' : 'Conductor', recibe: salida ? 'Conductor' : 'Responsable de flotilla' };
-  return `<div><h2>Firmas de conformidad</h2><p class="lead" style="margin:0">Ambas partes revisan el reporte y firman.</p></div>
-  <div class="grid">${['entrega', 'recibe'].map(k => `<div class="stack" id="f-${k}"${miss(v, 'f-' + k)}><h3>${k === 'entrega' ? 'Entrega' : 'Recibe'} · <span style="color:var(--muted)">${rol[k]}</span></h3>
-    <label class="f">Nombre completo *<input type="text" list="dlPersonal" id="sn-${k}" data-sn="${k}" value="${esc(R.firmas[k].nombre)}" autocomplete="off"></label>
-    <div class="soon" style="min-height:120px;display:grid;place-items:center">Recuadro de firma<br>(se activa en la siguiente fase)</div></div>`).join('')}</div>${datalistPersonal()}
+  const rol = rolesFirma(R);
+  return `<div><h2>Firmas de conformidad</h2><p class="lead" style="margin:0">Ambas partes revisan el reporte, escriben su nombre y firman con el dedo.</p></div>
+  <div class="grid">${['entrega', 'recibe'].map(k => { const f = R.firmas[k]; const falta = v && v.faltas.some(x => x.id === 'f-' + k);
+    return `<div class="stack sig${falta ? ' falta' : ''}" id="f-${k}"><h3>${k === 'entrega' ? 'Entrega' : 'Recibe'} · <span style="color:var(--muted)">${rol[k]}</span></h3>
+    <label class="f">Nombre completo *<input type="text" list="dlPersonal" id="sn-${k}" data-sn="${k}" value="${esc(f.nombre)}" autocomplete="off"></label>
+    <canvas id="pad-${k}" data-pad="${k}" aria-label="Recuadro para firmar: ${k === 'entrega' ? 'entrega' : 'recibe'}"></canvas>
+    <div class="line"><span id="sigst-${k}">${f.archivo ? `<span class="firmado">Firmado · ${fmtFecha(f.fecha)}</span>` : 'Firma aquí con el dedo'}</span>
+    <button type="button" class="linkbtn" data-clrfirma="${k}">Borrar firma</button></div></div>`; }).join('')}</div>${datalistPersonal()}
   <p class="lead" style="margin:0;font-size:.88rem">Al firmar, ambas partes aceptan que el estado de la unidad descrito en este reporte corresponde a lo observado en la fecha y hora indicadas.</p>`;
 }
 function pasoTerminar(R) {
@@ -546,7 +563,7 @@ function pasoTerminar(R) {
   const fallas = R.plantilla.filter(q => (R.respuestas[q.id] || {}).valor === 'Falla').length;
   const malas = TIRES.filter(t => R.llantas[t.k].estado === 'Malo').length;
   let h = `<div><h2>Revisar y guardar</h2><p class="lead" style="margin:0">${esc(R.movimiento || 'Revisión')} · ${esc(nombreUnidad(R.unidad) || 'sin unidad')} · Ref. <span class="mono">${refCorta(R.uuid)}</span></p></div>
-  <dl class="kv"><div><dt>Kilometraje</dt><dd>${fmtKm(R.km)}</dd></div><div><dt>Daños nuevos</dt><dd>${R.danos.length}</dd></div><div><dt>Fallas</dt><dd>${fallas}</dd></div><div><dt>Llantas malas</dt><dd>${malas}</dd></div></dl>`;
+  <dl class="kv"><div><dt>Kilometraje</dt><dd>${fmtKm(R.km)}</dd></div><div><dt>Daños nuevos</dt><dd>${R.danos.length}</dd></div><div><dt>Fallas</dt><dd>${fallas}</dd></div><div><dt>Llantas malas</dt><dd>${malas}</dd></div><div><dt>Fotos</dt><dd>${totalFotos(R)}</dd></div></dl>`;
   if (v.faltas.length) h += `<div class="errbox"><b>Faltan ${v.faltas.length} dato(s).</b> Toca cada uno para ir directo.</div><ul class="faltas">${v.faltas.map(f => `<li><button type="button" data-ir="${f.paso}|${f.id}"><span>${esc(STEPS[f.paso].t)} · ${esc(f.texto)}</span></button></li>`).join('')}</ul>`;
   else h += `<div class="info"><b>Todo completo.</b> Al guardar, la revisión queda en el teléfono y se envía cuando haya señal.</div>`;
   if (v.avisos.length) h += `<div class="warnbox"><b>Revisa antes de guardar:</b><ul style="margin:6px 0 0;padding-left:18px">${v.avisos.map(a => `<li>${esc(a)}</li>`).join('')}</ul></div>`;
@@ -573,6 +590,7 @@ async function terminar() {
   const R = S.R;
   R.fechaFin = isoLocal(); R.estado = 'por_enviar';
   // Se guarda el texto de cada pregunta tal como se contestó.
+  const roles = rolesFirma(R); ['entrega', 'recibe'].forEach(k => { R.firmas[k].rol = roles[k]; });
   R.respuestasFinal = R.plantilla.map(q => ({ id: q.id, seccion: q.seccion, pregunta: q.pregunta, tipo: q.tipo, valor: (R.respuestas[q.id] || {}).valor ?? '', comentario: (R.respuestas[q.id] || {}).comentario || '' }));
   try {
     await moverAPendientes(R);
@@ -582,6 +600,144 @@ async function terminar() {
   await recargarListas(); render(); window.scrollTo(0, 0);
 }
 function alertaInline(t) { const el = $('#saved'); if (el) el.textContent = '⚠ ' + t; }
+
+/* ════════ Fotos ════════ */
+// Cada foto vive en IndexedDB ("archivos") con su propio UUID. El borrador solo guarda la lista de UUID por casilla.
+const nFotos = (R, slot) => ((R.fotos || {})[slot] || []).length;
+const totalFotos = R => Object.values(R.fotos || {}).reduce((a, l) => a + l.length, 0);
+const slotId = slot => 'ph-' + slot.replace(/[^a-z0-9]+/gi, '-');
+const URLS = new Map();
+
+function fotosSlot(R, slot, etiqueta, o = {}) {
+  const lista = (R.fotos || {})[slot] || [];
+  const falta = o.v && o.obligatoria && !lista.length && S.intento;
+  return `<div class="ph-slot${falta ? ' falta' : ''}" id="${slotId(slot)}">
+    <div class="ph-head"><span>${esc(etiqueta)}${o.obligatoria ? ' <span class="req">*</span>' : ''}</span><span class="c">${lista.length ? lista.length + ' foto' + (lista.length > 1 ? 's' : '') : ''}</span></div>
+    <div class="ph-grid">${lista.map(u => `<button type="button" class="ph-th" data-verfoto="${u}" aria-label="Ver foto"><img data-thumb="${u}" alt=""></button>`).join('')}
+      <label class="ph-add">Tomar<br>foto<input type="file" accept="image/*" capture="environment" data-slot="${esc(slot)}" aria-label="Tomar foto: ${esc(etiqueta)}"></label>
+      ${o.compacto ? '' : `<label class="ph-add sec">Desde<br>galería<input type="file" accept="image/*" multiple data-slot="${esc(slot)}" aria-label="Elegir de la galería: ${esc(etiqueta)}"></label>`}
+    </div></div>`;
+}
+
+// Reduce a FOTO_MAX_PX por el lado largo, respeta la orientación de la cámara y convierte a JPEG.
+async function comprimir(file) {
+  let src, w, h;
+  try { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); w = src.width; h = src.height; }
+  catch (e) {
+    src = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('imagen')); i.src = URL.createObjectURL(file); });
+    w = src.naturalWidth; h = src.naturalHeight;
+  }
+  const k = Math.min(1, FOTO_MAX_PX / Math.max(w, h));
+  const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(src, 0, 0, c.width, c.height);
+  if (src.close) src.close(); else if (src.src) URL.revokeObjectURL(src.src);
+  const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', FOTO_CALIDAD));
+  if (!blob) throw new Error('imagen');
+  return { blob, ancho: c.width, alto: c.height };
+}
+// Algunos iPhone viejos no guardan Blob en IndexedDB: se guarda como bytes.
+async function guardarArchivo(rec) {
+  try { await DB.put('archivos', rec); }
+  catch (e) {
+    if (e && e.name === 'QuotaExceededError') throw new Error('espacio');
+    const buf = await rec.blob.arrayBuffer(); const r2 = { ...rec, blob: null, bytesData: buf };
+    try { await DB.put('archivos', r2); } catch (e2) { throw new Error(e2 && e2.name === 'QuotaExceededError' ? 'espacio' : 'guardar'); }
+  }
+}
+async function blobDe(uuid) {
+  const r = await DB.get('archivos', uuid); if (!r) return null;
+  return r.blob || (r.bytesData ? new Blob([r.bytesData], { type: r.mime }) : null);
+}
+async function agregarFoto(slot, file) {
+  const R = S.R; const { blob, ancho, alto } = await comprimir(file);
+  const rec = { uuid: uuid(), revision: R.uuid, tipo: 'foto', slot, nota: '', blob, mime: 'image/jpeg', ancho, alto, bytes: blob.size, capturado: isoLocal(), nombreOriginal: file.name || '' };
+  await guardarArchivo(rec);
+  (R.fotos[slot] = R.fotos[slot] || []).push(rec.uuid);
+  URLS.set(rec.uuid, URL.createObjectURL(blob));
+  cambio(); await guardarYa();
+}
+async function pintarMiniaturas() {
+  for (const img of document.querySelectorAll('img[data-thumb]')) {
+    const u = img.dataset.thumb;
+    if (!URLS.has(u)) { const b = await blobDe(u).catch(() => null); if (!b) continue; URLS.set(u, URL.createObjectURL(b)); }
+    img.src = URLS.get(u);
+    const rec = S._notas && S._notas[u]; if (rec) { const nt = document.createElement('span'); nt.className = 'nt'; nt.textContent = rec; img.after(nt); }
+  }
+}
+async function borrarArchivosDe(revUuid) {
+  const db = await DB.open();
+  await new Promise(res => {
+    const t = db.transaction('archivos', 'readwrite'); const idx = t.objectStore('archivos').index('revision');
+    idx.openCursor(IDBKeyRange.only(revUuid)).onsuccess = e => { const c = e.target.result; if (c) { const u = c.value.uuid; if (URLS.has(u)) { URL.revokeObjectURL(URLS.get(u)); URLS.delete(u); } c.delete(); c.continue(); } };
+    t.oncomplete = res; t.onerror = res;
+  });
+}
+async function revisarEspacio() {
+  try {
+    const e = await navigator.storage.estimate();
+    if (e.quota && e.quota - e.usage < 60 * 1024 * 1024) mensaje('El teléfono tiene poco espacio para fotos. Envía las revisiones pendientes cuando haya señal o libera espacio.');
+  } catch (err) { }
+}
+
+/* Visor: ver en grande, escribir nota, borrar. */
+async function abrirVisor(u) {
+  const rec = await DB.get('archivos', u); if (!rec) return;
+  const b = await blobDe(u); if (!URLS.has(u) && b) URLS.set(u, URL.createObjectURL(b));
+  const editable = S.vista === 'captura' && S.R && S.R.uuid === rec.revision;
+  S.visor = { u, confirmar: false };
+  $('#visor').innerHTML = `<div class="visor" role="dialog" aria-label="Foto">
+    <div class="img"><img src="${URLS.get(u)}" alt="Foto"></div>
+    <div class="pie"><div class="meta">${esc(rec.ancho)}×${esc(rec.alto)} px · ${Math.round(rec.bytes / 1024)} KB · ${fmtFecha(rec.capturado)}</div>
+    ${editable ? `<input type="text" id="notaFoto" value="${esc(rec.nota)}" placeholder="Nota (opcional): qué muestra la foto">` : (rec.nota ? `<div>${esc(rec.nota)}</div>` : '')}
+    <div class="acts">${editable ? `<button type="button" class="btn danger" id="vBorrar">Borrar foto</button>` : ''}<button type="button" class="btn primary" id="vCerrar">Listo</button></div></div></div>`;
+  document.body.style.overflow = 'hidden';
+  const cerrar = async () => {
+    if (editable) { const n = $('#notaFoto').value.trim(); if (n !== rec.nota) { rec.nota = n; await DB.put('archivos', rec); (S._notas = S._notas || {})[u] = n; } }
+    $('#visor').innerHTML = ''; document.body.style.overflow = ''; S.visor = null; rerender();
+  };
+  $('#vCerrar').onclick = cerrar;
+  if (editable) $('#vBorrar').onclick = async e => {
+    if (!S.visor.confirmar) { S.visor.confirmar = true; e.target.textContent = '¿Seguro? Toca otra vez'; e.target.classList.add('go'); return; }
+    const R = S.R; R.fotos[rec.slot] = (R.fotos[rec.slot] || []).filter(x => x !== u);
+    await DB.del('archivos', u); if (URLS.has(u)) { URL.revokeObjectURL(URLS.get(u)); URLS.delete(u); }
+    cambio(); await guardarYa(); $('#visor').innerHTML = ''; document.body.style.overflow = ''; S.visor = null; rerender();
+  };
+}
+
+/* ════════ Firmas ════════ */
+// El trazo se guarda como PNG (fondo blanco) en "archivos" al levantar el dedo.
+function iniciarFirmas() {
+  document.querySelectorAll('canvas[data-pad]').forEach(async cv => {
+    const k = cv.dataset.pad, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = cv.clientWidth, h = cv.clientHeight; cv.width = w * dpr; cv.height = h * dpr;
+    const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 2.6; ctx.strokeStyle = '#111';
+    const f = S.R.firmas[k];
+    if (f.archivo) { const b = await blobDe(f.archivo); if (b) { const bm = await createImageBitmap(b).catch(() => null); if (bm) ctx.drawImage(bm, 0, 0, w, h); } }
+    let ult = null, trazo = false;
+    const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    cv.onpointerdown = e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); ult = pos(e); trazo = true; ctx.beginPath(); ctx.arc(ult[0], ult[1], 1.2, 0, Math.PI * 2); ctx.fillStyle = '#111'; ctx.fill(); };
+    cv.onpointermove = e => { if (!ult) return; const p = pos(e); ctx.beginPath(); ctx.moveTo(ult[0], ult[1]); ctx.lineTo(p[0], p[1]); ctx.stroke(); ult = p; };
+    cv.onpointerup = cv.onpointercancel = async () => { if (!trazo) return; ult = null; trazo = false; await guardarFirma(k, cv); };
+  });
+}
+async function guardarFirma(k, cv) {
+  const R = S.R, f = R.firmas[k];
+  const out = document.createElement('canvas'); out.width = 600; out.height = Math.round(600 * cv.height / cv.width);
+  const o = out.getContext('2d'); o.fillStyle = '#fff'; o.fillRect(0, 0, out.width, out.height); o.drawImage(cv, 0, 0, out.width, out.height);
+  const blob = await new Promise(res => out.toBlob(res, 'image/png'));
+  const id = f.archivo || uuid();
+  await guardarArchivo({ uuid: id, revision: R.uuid, tipo: 'firma', slot: 'firma:' + k, nota: '', blob, mime: 'image/png', ancho: out.width, alto: out.height, bytes: blob.size, capturado: isoLocal() });
+  f.archivo = id; f.fecha = isoLocal(); f.rol = rolesFirma(R)[k];
+  cambio(); await guardarYa();
+  const st = document.getElementById('sigst-' + k); if (st) st.innerHTML = `<span class="firmado">Firmado · ${fmtFecha(f.fecha)}</span>`;
+}
+async function borrarFirma(k) {
+  const f = S.R.firmas[k];
+  if (f.archivo) await DB.del('archivos', f.archivo);
+  f.archivo = null; f.fecha = null; cambio(); await guardarYa(); rerender();
+}
 
 /* ════════ QR (foto con la cámara; funciona sin señal) ════════ */
 async function leerQRDeFoto(file) {
@@ -632,7 +788,13 @@ document.addEventListener('change', async e => {
     catch (err) { mensaje('No se leyó ningún QR. Toma la foto de cerca, con buena luz y el código completo.'); }
     return;
   }
-  if (S.R && el.dataset.f) { S.R[el.dataset.f] = el.value; cambio(); if (el.dataset.f === 'revisor') { /* nada más */ } }
+  if (el.dataset.slot && S.R) {
+    const files = [...(el.files || [])]; const slot = el.dataset.slot; el.value = '';
+    const lbl = el.closest('.ph-add'); if (lbl) lbl.classList.add('busy');
+    for (const f of files) { try { await agregarFoto(slot, f); } catch (err) { mensaje('No se pudo guardar la foto. ' + (err && err.message === 'espacio' ? 'El teléfono no tiene espacio suficiente.' : 'Intenta de nuevo.')); } }
+    rerender(); revisarEspacio(); return;
+  }
+  if (S.R && el.dataset.f) { S.R[el.dataset.f] = el.value; cambio(); }
 });
 // Al teclear el km no se redibuja (para no perder el teclado); solo se recalcula al salir del campo.
 function pintarAvisoKm() { }
@@ -651,14 +813,16 @@ document.addEventListener('click', async e => {
     try { await aplicarQR(v); } catch (err) { mensaje('Ese texto no contiene un enlace ni un token válido.'); }
     return;
   }
-  if (d.resume) { const r = await DB.get('borradores', d.resume); if (r) { S.R = r; S.paso = 0; S.intento = false; S.vista = 'captura'; ligarSalida(); render(); window.scrollTo(0, 0); } return; }
+  if (d.resume) { const r = await DB.get('borradores', d.resume); if (r) { r.fotos = r.fotos || {}; ['entrega', 'recibe'].forEach(k => { r.firmas[k] = Object.assign({ nombre: '', archivo: null, fecha: null, rol: '' }, r.firmas[k]); }); S.R = r; S.paso = 0; S.intento = false; S.vista = 'captura'; ligarSalida(); render(); window.scrollTo(0, 0); } return; }
   if (d.delb) {
     if (S.confirmDel !== d.delb) { S.confirmDel = d.delb; render(); return; }
-    await DB.del('borradores', d.delb); S.confirmDel = null; await recargarListas(); render(); return;
+    await DB.del('borradores', d.delb); await borrarArchivosDe(d.delb); S.confirmDel = null; await recargarListas(); render(); return;
   }
   if (d.ver) { S.detalle = S.pendientes.find(p => p.uuid === d.ver); S.vista = 'detalle'; render(); window.scrollTo(0, 0); return; }
+  if (d.verfoto) { abrirVisor(d.verfoto); return; }
   if (!R || S.vista !== 'captura') return;
 
+  if (d.clrfirma) { await borrarFirma(d.clrfirma); return; }
   if (d.step) { guardarYa(); irPaso(+d.step); return; }
   if (d.ir) { const [p, id] = d.ir.split('|'); irPaso(+p, id); return; }
   if (d.mov) {

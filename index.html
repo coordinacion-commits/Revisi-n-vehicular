@@ -132,6 +132,32 @@ textarea{min-height:70px;resize:vertical}
 .kv dt{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
 .kv dd{margin:0;font-weight:500;overflow-wrap:anywhere}
 .ref{font-family:var(--f-mono);font-size:1.6rem;color:var(--accent);letter-spacing:.06em}
+.ph-slot{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);display:flex;flex-direction:column;gap:8px;min-width:0}
+.ph-slot.falta{border-color:var(--bad);box-shadow:inset 0 0 0 1px var(--bad)}
+.ph-head{display:flex;justify-content:space-between;gap:8px;font-size:.85rem;font-weight:600}
+.ph-head .c{color:var(--muted);font-weight:500;font-family:var(--f-mono);font-size:.78rem}
+.ph-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:6px}
+.ph-th{position:relative;aspect-ratio:1;max-width:100%;border:1px solid var(--line);border-radius:8px;overflow:hidden;padding:0;background:var(--card);cursor:pointer}
+.ph-th img{width:100%;height:100%;object-fit:cover;display:block}
+.ph-th .nt{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);color:#fff;font-size:.62rem;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ph-add{position:relative;aspect-ratio:1;max-width:100%;border:1.5px dashed var(--accent);border-radius:8px;display:grid;place-items:center;text-align:center;font:700 .74rem var(--f-body);color:var(--accent);cursor:pointer;padding:4px;line-height:1.15}
+.ph-add.sec{border-color:var(--line);color:var(--muted)}
+.ph-add input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+.ph-add.busy{pointer-events:none;opacity:.6}
+.photos-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.visor{position:fixed;inset:0;z-index:50;background:rgba(8,12,16,.92);display:flex;flex-direction:column;padding:calc(10px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));gap:10px}
+.visor .img{flex:1;min-height:0;display:grid;place-items:center}
+.visor img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+.visor .pie{background:var(--card);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px;max-width:760px;width:100%;margin:0 auto}
+.visor .pie .acts{display:flex;gap:8px}
+.visor .pie .acts .btn{flex:1}
+.visor .meta{font-size:.8rem;color:var(--muted)}
+.btn.danger{border-color:var(--bad);color:var(--bad)}
+.btn.danger.go{background:var(--bad);color:#fff}
+.sig canvas{width:100%;height:180px;background:#fff;border:1px solid var(--line);border-radius:10px;touch-action:none;display:block}
+.sig .line{display:flex;justify-content:space-between;align-items:center;font-size:.8rem;color:var(--muted);gap:8px}
+.sig.falta canvas{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+.firmado{color:var(--ok);font-weight:600}
 .foot{color:var(--muted);font-size:.78rem;text-align:center;margin-top:22px}
 @media (prefers-reduced-motion:no-preference){.panel{animation:in .16s ease-out}@keyframes in{from{transform:translateY(4px)}to{transform:none}}}
 </style>
@@ -142,6 +168,7 @@ textarea{min-height:70px;resize:vertical}
   <span class="dot" id="stDot"></span><b id="stNet">Revisando conexión…</b>
   <span id="stCat"></span><span class="sp"></span><span id="stPend"></span>
 </div>
+<div id="visor"></div>
 <div class="wrap"><main id="app"><div class="empty">Cargando…</div></main></div>
 <div class="bar" id="bar" hidden><div class="in">
   <button class="btn" id="prev" type="button">Atrás</button>
