@@ -3,7 +3,7 @@
 // servidor confirme (envío en la Fase 4).
 'use strict';
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '3.1.0';
 const FOTO_MAX_PX = 1600, FOTO_CALIDAD = 0.72;   // ~250–400 KB por foto
 const CFG = window.APP_CONFIG || {};
 const SCRIPT_URL = String(CFG.SCRIPT_URL || '').trim();
@@ -60,6 +60,16 @@ const VIEWS = [
   { k: 'lat_izq', t: 'Lateral izquierdo', vb: [0, 0, 420, 160], g: `<g transform="translate(420,0) scale(-1,1)">${SIDE}</g>`, hint: '◂ frente' },
   { k: 'lat_der', t: 'Lateral derecho', vb: [0, 0, 420, 160], g: SIDE, hint: 'frente ▸' }
 ];
+
+/* Respuestas por tipo de pregunta. "hallazgo": cuenta como falla. "texto": obliga a escribir. */
+const OPCIONES = {
+  bfn: [['Bien', 'Bien', 'ok'], ['Falla', 'Falla', 'bad'], ['N/A', 'N/A']],
+  sn:  [['Sí', 'Sí', 'ok'], ['No', 'No', 'bad']],
+  sni: [['Sí', 'Sí', 'ok'], ['No', 'No', 'bad'], ['Incompleto', 'Incompleto', 'warn']]
+};
+const esHallazgo = (q, v) => (q.tipo === 'bfn' && v === 'Falla') || ((q.tipo === 'sn' || q.tipo === 'sni') && v === 'No') || (q.tipo === 'sni' && v === 'Incompleto');
+const pideTexto = (q, v) => (q.tipo === 'bfn' && v === 'Falla') || (q.tipo === 'sni' && v === 'Incompleto');
+const textoPide = (q, v) => v === 'Incompleto' ? '¿Qué le falta? (obligatorio)' : '¿Qué falla? (obligatorio)';
 
 /* ════════ Utilidades ════════ */
 const $ = s => document.querySelector(s);
@@ -262,7 +272,7 @@ function nuevaRevision(placas) {
     firmas: { entrega: { nombre: '', archivo: null, fecha: null, rol: '' }, recibe: { nombre: '', archivo: null, fecha: null, rol: '' } }
   };
   const ultimo = S._ultimoRevisor; if (ultimo && (c.personal || []).includes(ultimo)) R.revisor = ultimo;
-  S.R = R; S.paso = 0; S.intento = false; S.vista = 'captura';
+  S.R = R; S.paso = 0; S.intento = false; S.vista = 'captura'; S.otro = {};
   if (placas) elegirUnidad(placas);
   guardarYa(); render(); window.scrollTo(0, 0);
 }
@@ -346,11 +356,12 @@ function validar(R) {
   if (R.movimiento === 'Regreso' && !R.salida) avisos.push('No se encontró la salida de esta unidad. El regreso se guardará y el servidor lo ligará al recibirlo.');
   R.danos.forEach((d, i) => { if (!String(d.n || '').trim()) avisos.push(`El daño ${i + 1} no tiene descripción.`); });
   TIRES.forEach(t => { if (!R.llantas[t.k].estado) F(2, 't-' + t.k, 'Estado de llanta: ' + t.t); });
+  if (!nFotos(R, 'llanta:ref')) F(2, 'ph-llanta-ref', 'Foto de la llanta de refacción');
   R.plantilla.forEach(q => {
     const a = R.respuestas[q.id] || {};
     const vacio = a.valor === undefined || a.valor === '' || a.valor === null;
     if (q.obligatoria && vacio) F(3, 'q-' + q.id, q.pregunta);
-    else if (a.valor === 'Falla' && !String(a.comentario || '').trim()) F(3, 'q-' + q.id, 'Comentario de la falla: ' + q.pregunta);
+    else if (pideTexto(q, a.valor) && !String(a.comentario || '').trim()) F(3, 'q-' + q.id, (a.valor === 'Incompleto' ? 'Qué falta: ' : 'Comentario de la falla: ') + q.pregunta);
   });
   R.plantilla.forEach(q => { if (q.exigeFoto && !nFotos(R, 'q:' + q.id)) F(3, 'q-' + q.id, 'Foto requerida: ' + q.pregunta); });
   PHOTOS.forEach(([k, l]) => { if (!nFotos(R, 'fijo:' + k)) F(4, 'ph-fijo-' + k, 'Foto: ' + l); });
@@ -421,7 +432,7 @@ function vistaPendientes() {
 
 function vistaDetalle(p) {
   if (!p) return '';
-  const fallas = (p.plantilla || []).filter(q => (p.respuestas[q.id] || {}).valor === 'Falla');
+  const fallas = (p.plantilla || []).filter(q => esHallazgo(q, (p.respuestas[q.id] || {}).valor));
   return `<button class="btn small" type="button" data-act="pendientes">‹ Por enviar</button>
   <h1 style="margin-top:10px">${esc(p.movimiento)} · ${esc(nombreUnidad(p.unidad))}</h1>
   <p class="lead">Ref. provisional <span class="mono">${refCorta(p.uuid)}</span> · capturada ${fmtFecha(p.fechaFin)}</p>
@@ -450,6 +461,16 @@ function seg(name, opts, cur) {
   return `<div class="seg" role="group">${opts.map(([val, l, cls]) => `<button type="button" class="${cls || ''}" data-seg="${name}" data-v="${esc(val)}" aria-pressed="${cur === val}">${esc(l)}</button>`).join('')}</div>`;
 }
 const miss = (v, id) => v && v.faltas.some(f => f.id === id) ? ' style="outline:2px solid var(--bad);outline-offset:3px;border-radius:8px"' : '';
+// Lista desplegable de Personal + "Otra persona (escribir)". Funciona igual en iPhone y Android.
+// key: 'f:conductor' o 'sn:entrega' / 'sn:recibe'.
+function selPersona(key, valor, idBase) {
+  const lista = personal(); S.otro = S.otro || {};
+  const otro = (valor && !lista.includes(valor)) || S.otro[key];
+  const [tipo, campo] = key.split(':');
+  const attr = tipo === 'sn' ? `data-sn="${campo}"` : `data-f="${campo}"`;
+  return `<select id="${idBase}" data-psel="${key}"><option value="">Elige un nombre</option>${lista.map(n => `<option ${!otro && valor === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="__otro" ${otro ? 'selected' : ''}>Otra persona (escribir)</option></select>
+    ${otro ? `<input type="text" id="${idBase}-otro" ${attr} value="${esc(valor)}" placeholder="Nombre completo" autocomplete="off" style="margin-top:6px">` : ''}`;
+}
 function datalistPersonal() { return `<datalist id="dlPersonal">${personal().map(n => `<option value="${esc(n)}">`).join('')}</datalist>`; }
 
 function pasoUnidad(R, v) {
@@ -485,7 +506,7 @@ function pasoUnidad(R, v) {
   const ult = kmUltimo(R.placas);
   h += `<div class="grid">
     <label class="f" id="f-km"${miss(v, 'f-km')}>Kilometraje *<input type="number" inputmode="numeric" id="in-km" data-f="km" value="${esc(R.km)}" placeholder="${ult ? 'Último: ' + ult : 'Ej. 85420'}"></label>
-    <label class="f">Conductor<input type="text" list="dlPersonal" id="in-conductor" data-f="conductor" value="${esc(R.conductor)}" autocomplete="off"></label>
+    <div class="f" style="display:flex;flex-direction:column;gap:4px;font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;min-width:0"><label for="in-conductor">Conductor</label>${selPersona('f:conductor', R.conductor, 'in-conductor')}</div>
     <label class="f">Destino / área<input type="text" id="in-destino" data-f="destino" value="${esc(R.destino)}"></label></div>${datalistPersonal()}`;
   const k = +R.km;
   if (R.km !== '' && ult && k < ult) h += `<div class="warnbox">Es menor que el último kilometraje conocido (${fmtKm(ult)}). Verifica el tablero; puedes continuar.</div>`;
@@ -514,27 +535,26 @@ function pasoCarroceria(R) {
   return h;
 }
 function pasoLlantas(R, v) {
-  return `<div><h2>Llantas</h2><p class="lead" style="margin:0">Revisa las 4 llantas y la refacción. Dibujo en milímetros (mínimo recomendado 1.6 mm) y presión en PSI.</p></div>
+  return `<div><h2>Llantas</h2><p class="lead" style="margin:0">Revisa las 4 llantas y la refacción. La foto de la refacción es obligatoria.</p></div>
   <div class="tires">${TIRES.map(t => { const L = R.llantas[t.k]; return `<div class="tire" id="t-${t.k}"${miss(v, 't-' + t.k)}><header><h3>${t.t} *</h3><span class="pos">${t.p}</span></header>
     ${seg('tire:' + t.k, [['Bueno', 'Bueno', 'ok'], ['Regular', 'Regular', 'warn'], ['Malo', 'Malo', 'bad']], L.estado)}
-    <div class="row2"><label class="f">Dibujo (mm)<input type="number" step="0.1" inputmode="decimal" id="t-${t.k}-mm" data-t="${t.k}" data-tf="mm" value="${esc(L.mm)}"></label>
-    <label class="f">Presión (PSI)<input type="number" inputmode="numeric" id="t-${t.k}-psi" data-t="${t.k}" data-tf="psi" value="${esc(L.psi)}"></label></div>
-    ${fotosSlot(R, 'llanta:' + t.k, 'Foto de la llanta', { compacto: true })}</div>`; }).join('')}</div>`;
+    ${fotosSlot(R, 'llanta:' + t.k, t.k === 'ref' ? 'Foto de la refacción' : 'Foto de la llanta', { compacto: true, obligatoria: t.k === 'ref', v })}</div>`; }).join('')}</div>`;
 }
 function pasoRevision(R, v) {
   if (!R.plantilla.length) return `<h2>Revisión general</h2><div class="empty">No hay preguntas en la plantilla. Conéctate para descargar las listas.</div>`;
   const grupos = []; R.plantilla.forEach(q => { let g = grupos.find(x => x.s === q.seccion); if (!g) grupos.push(g = { s: q.seccion, qs: [] }); g.qs.push(q); });
-  return `<div><h2>Revisión general</h2><p class="lead" style="margin:0">Marca cada punto. Usa N/A si no aplica a esta unidad. Una falla necesita comentario.</p></div>
+  return `<div><h2>Revisión general</h2><p class="lead" style="margin:0">Marca cada punto. Usa N/A si no aplica a esta unidad. Una falla o un faltante necesita comentario.</p></div>
   <div>${grupos.map(g => `<div class="group-t">${esc(g.s)}</div>${g.qs.map(q => {
     const a = R.respuestas[q.id] || {}; const falta = v && v.faltas.some(f => f.id === 'q-' + q.id);
     let ctl;
     if (q.tipo === 'numero') ctl = `<input type="number" inputmode="decimal" id="qv-${q.id}" data-q="${q.id}" value="${esc(a.valor ?? '')}" style="max-width:180px">`;
     else if (q.tipo === 'texto') ctl = `<input type="text" id="qv-${q.id}" data-q="${q.id}" value="${esc(a.valor ?? '')}">`;
-    else ctl = seg('q:' + q.id, [['Bien', 'Bien', 'ok'], ['Falla', 'Falla', 'bad'], ['N/A', 'N/A']], a.valor);
-    return `<div class="q${falta ? ' missing' : ''}" id="q-${q.id}"><div class="qt"><span>${esc(q.pregunta)}${q.obligatoria ? ' <span class="req">*</span>' : ''}</span>${q.tipo === 'bfn' ? ctl : ''}</div>
-      ${q.tipo !== 'bfn' ? ctl : ''}
-      ${a.valor === 'Falla' ? `<input type="text" id="qc-${q.id}" data-qc="${q.id}" value="${esc(a.comentario || '')}" placeholder="¿Qué falla? (obligatorio)">` : ''}
-      ${q.exigeFoto || a.valor === 'Falla' || nFotos(R, 'q:' + q.id) ? fotosSlot(R, 'q:' + q.id, q.exigeFoto ? 'Foto requerida' : 'Foto de evidencia', { obligatoria: q.exigeFoto, compacto: true }) : ''}</div>`;
+    else ctl = seg('q:' + q.id, OPCIONES[q.tipo] || OPCIONES.bfn, a.valor);
+    const enLinea = !!OPCIONES[q.tipo] || !q.tipo;
+    return `<div class="q${falta ? ' missing' : ''}" id="q-${q.id}"><div class="qt"><span>${esc(q.pregunta)}${q.obligatoria ? ' <span class="req">*</span>' : ''}</span>${enLinea ? ctl : ''}</div>
+      ${!enLinea ? ctl : ''}
+      ${pideTexto(q, a.valor) ? `<input type="text" id="qc-${q.id}" data-qc="${q.id}" value="${esc(a.comentario || '')}" placeholder="${textoPide(q, a.valor)}">` : ''}
+      ${q.exigeFoto || esHallazgo(q, a.valor) || nFotos(R, 'q:' + q.id) ? fotosSlot(R, 'q:' + q.id, q.exigeFoto ? 'Foto requerida' : 'Foto de evidencia', { obligatoria: q.exigeFoto, compacto: true }) : ''}</div>`;
   }).join('')}`).join('')}</div>
   <label class="f">Observaciones generales<textarea id="in-obs" data-f="obs" placeholder="Fallas, faltantes o comentarios">${esc(R.obs)}</textarea></label>`;
 }
@@ -552,7 +572,7 @@ function pasoFirmas(R, v) {
   return `<div><h2>Firmas de conformidad</h2><p class="lead" style="margin:0">Ambas partes revisan el reporte, escriben su nombre y firman con el dedo.</p></div>
   <div class="grid">${['entrega', 'recibe'].map(k => { const f = R.firmas[k]; const falta = v && v.faltas.some(x => x.id === 'f-' + k);
     return `<div class="stack sig${falta ? ' falta' : ''}" id="f-${k}"><h3>${k === 'entrega' ? 'Entrega' : 'Recibe'} · <span style="color:var(--muted)">${rol[k]}</span></h3>
-    <label class="f">Nombre completo *<input type="text" list="dlPersonal" id="sn-${k}" data-sn="${k}" value="${esc(f.nombre)}" autocomplete="off"></label>
+    <div class="f" style="display:flex;flex-direction:column;gap:4px;font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em"><label for="sn-${k}">Nombre completo *</label>${selPersona('sn:' + k, f.nombre, 'sn-' + k)}</div>
     <canvas id="pad-${k}" data-pad="${k}" aria-label="Recuadro para firmar: ${k === 'entrega' ? 'entrega' : 'recibe'}"></canvas>
     <div class="line"><span id="sigst-${k}">${f.archivo ? `<span class="firmado">Firmado · ${fmtFecha(f.fecha)}</span>` : 'Firma aquí con el dedo'}</span>
     <button type="button" class="linkbtn" data-clrfirma="${k}">Borrar firma</button></div></div>`; }).join('')}</div>${datalistPersonal()}
@@ -560,7 +580,7 @@ function pasoFirmas(R, v) {
 }
 function pasoTerminar(R) {
   const v = validar(R);
-  const fallas = R.plantilla.filter(q => (R.respuestas[q.id] || {}).valor === 'Falla').length;
+  const fallas = R.plantilla.filter(q => esHallazgo(q, (R.respuestas[q.id] || {}).valor)).length;
   const malas = TIRES.filter(t => R.llantas[t.k].estado === 'Malo').length;
   let h = `<div><h2>Revisar y guardar</h2><p class="lead" style="margin:0">${esc(R.movimiento || 'Revisión')} · ${esc(nombreUnidad(R.unidad) || 'sin unidad')} · Ref. <span class="mono">${refCorta(R.uuid)}</span></p></div>
   <dl class="kv"><div><dt>Kilometraje</dt><dd>${fmtKm(R.km)}</dd></div><div><dt>Daños nuevos</dt><dd>${R.danos.length}</dd></div><div><dt>Fallas</dt><dd>${fallas}</dd></div><div><dt>Llantas malas</dt><dd>${malas}</dd></div><div><dt>Fotos</dt><dd>${totalFotos(R)}</dd></div></dl>`;
@@ -794,6 +814,13 @@ document.addEventListener('change', async e => {
     for (const f of files) { try { await agregarFoto(slot, f); } catch (err) { mensaje('No se pudo guardar la foto. ' + (err && err.message === 'espacio' ? 'El teléfono no tiene espacio suficiente.' : 'Intenta de nuevo.')); } }
     rerender(); revisarEspacio(); return;
   }
+  if (S.R && el.dataset.psel) {
+    const key = el.dataset.psel, [tipo, campo] = key.split(':'); S.otro = S.otro || {};
+    const set = v => { if (tipo === 'sn') S.R.firmas[campo].nombre = v; else S.R[campo] = v; };
+    if (el.value === '__otro') { S.otro[key] = true; set(''); cambio(); rerender(); const i = document.getElementById(el.id + '-otro'); if (i) i.focus(); }
+    else { S.otro[key] = false; set(el.value); cambio(); rerender(); }
+    return;
+  }
   if (S.R && el.dataset.f) { S.R[el.dataset.f] = el.value; cambio(); }
 });
 // Al teclear el km no se redibuja (para no perder el teclado); solo se recalcula al salir del campo.
@@ -813,7 +840,7 @@ document.addEventListener('click', async e => {
     try { await aplicarQR(v); } catch (err) { mensaje('Ese texto no contiene un enlace ni un token válido.'); }
     return;
   }
-  if (d.resume) { const r = await DB.get('borradores', d.resume); if (r) { r.fotos = r.fotos || {}; ['entrega', 'recibe'].forEach(k => { r.firmas[k] = Object.assign({ nombre: '', archivo: null, fecha: null, rol: '' }, r.firmas[k]); }); S.R = r; S.paso = 0; S.intento = false; S.vista = 'captura'; ligarSalida(); render(); window.scrollTo(0, 0); } return; }
+  if (d.resume) { const r = await DB.get('borradores', d.resume); if (r) { r.fotos = r.fotos || {}; ['entrega', 'recibe'].forEach(k => { r.firmas[k] = Object.assign({ nombre: '', archivo: null, fecha: null, rol: '' }, r.firmas[k]); }); S.otro = {}; S.R = r; S.paso = 0; S.intento = false; S.vista = 'captura'; ligarSalida(); render(); window.scrollTo(0, 0); } return; }
   if (d.delb) {
     if (S.confirmDel !== d.delb) { S.confirmDel = d.delb; render(); return; }
     await DB.del('borradores', d.delb); await borrarArchivosDe(d.delb); S.confirmDel = null; await recargarListas(); render(); return;
