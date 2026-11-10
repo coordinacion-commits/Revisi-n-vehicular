@@ -1,9 +1,9 @@
-// ─── REVISIÓN VEHICULAR FUCESA · app.js (FASE 3: + fotos y firmas) ─────────
+// ─── REVISIÓN VEHICULAR FUCESA · app.js (FASE 4: + envío al servidor) ──────
 // Todo se guarda en IndexedDB del teléfono. Nada se borra hasta que el
 // servidor confirme (envío en la Fase 4).
 'use strict';
 
-const APP_VERSION = '3.1.0';
+const APP_VERSION = '4.0.0';
 const FOTO_MAX_PX = 1600, FOTO_CALIDAD = 0.72;   // ~250–400 KB por foto
 const CFG = window.APP_CONFIG || {};
 const SCRIPT_URL = String(CFG.SCRIPT_URL || '').trim();
@@ -188,6 +188,7 @@ function leerParametros_() {
 async function recargarListas() {
   S.borradores = (await DB.all('borradores')).sort((a, b) => b.actualizado.localeCompare(a.actualizado));
   S.pendientes = (await DB.all('pendientes')).sort((a, b) => b.fechaFin.localeCompare(a.fechaFin));
+  S.enviadas = (await DB.meta('enviadas')) || [];
   pintarEstado();
 }
 
@@ -205,6 +206,7 @@ async function revisarRed(forzar) {
     if (viejo || forzar) actualizarCatalogo();
   }
   if (ok && S.swReg) S.swReg.update().catch(() => { });
+  if (ok && S.token) sincronizar();
 }
 
 async function pedir(params, ms = 15000) {
@@ -233,7 +235,7 @@ function pintarEstado(msg) {
   net.textContent = msg || (S.online === true ? 'En línea' : S.online === false ? 'Sin conexión' : 'Revisando conexión…');
   $('#stCat').textContent = S.catFecha ? '· Listas del ' + fmtFecha(S.catFecha) : '· Sin listas descargadas';
   const n = S.pendientes.length;
-  $('#stPend').textContent = n ? `${n} ${n === 1 ? 'revisión' : 'revisiones'} por enviar` : 'Nada por enviar';
+  $('#stPend').textContent = ENVIO.activo ? (ENVIO.progreso || 'Enviando…') : n ? `${n} ${n === 1 ? 'revisión' : 'revisiones'} por enviar` : 'Todo enviado ✓';
 }
 
 /* ════════ Service worker y versiones ════════ */
@@ -414,26 +416,43 @@ function vistaInicio() {
       <span class="acts"><button class="btn small primary" type="button" data-resume="${b.uuid}">Continuar</button>
       <button class="btn small" type="button" data-delb="${b.uuid}">${S.confirmDel === b.uuid ? '¿Seguro? Toca otra vez' : 'Descartar'}</button></span></div>`).join('')}</div>`;
   }
-  h += `<button class="btn" type="button" data-act="pendientes">Por enviar (${S.pendientes.length})</button>`;
+  h += `<button class="btn" type="button" data-act="pendientes">Envíos · ${S.pendientes.length ? S.pendientes.length + ' por enviar' : 'todo enviado'}</button>`;
   h += `</div><p class="foot">App ${APP_VERSION}${S.catFecha ? ' · listas del ' + fmtFecha(S.catFecha) : ''}</p>`;
   return h;
 }
 
+function estadoEnvio(p) {
+  const sy = p.sync || {};
+  if (ENVIO.activo && ENVIO.actual === p.uuid) return { cls: 'pend', t: ENVIO.progreso || 'Enviando…' };
+  if (sy.error && sy.siguiente) return { cls: 'ruta', t: `No se envió: ${sy.error}. Reintenta ${new Date(sy.siguiente).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}` };
+  if (sy.folio) return { cls: 'pend', t: `Folio ${sy.folio} · faltan ${(sy.faltan || []).length} archivo(s)` };
+  return { cls: 'pend', t: S.online ? 'En espera de envío' : 'Esperando señal' };
+}
 function vistaPendientes() {
-  let h = `<button class="btn small" type="button" data-act="inicio">‹ Inicio</button><h1 style="margin-top:10px">Por enviar</h1>
-    <p class="lead">Revisiones guardadas en este teléfono. Se borran solas cuando el servidor confirma que las recibió.</p>`;
-  h += `<div class="info" style="margin-bottom:12px">El envío automático se activa en la siguiente fase. Por ahora, todo queda guardado aquí con su referencia provisional.</div>`;
-  if (!S.pendientes.length) h += `<div class="empty">No hay revisiones por enviar.</div>`;
-  else h += `<div class="list">${S.pendientes.map(p => `<button type="button" class="row" data-ver="${p.uuid}" style="cursor:pointer">
-    <b>${esc(p.movimiento)} · ${esc(nombreUnidad(p.unidad))}</b><span class="st pend">Por enviar</span>
-    <span class="meta">Ref. <span class="mono">${refCorta(p.uuid)}</span> · ${esc(p.placas)} · ${fmtKm(p.km)} · ${fmtFecha(p.fechaFin)}</span></button>`).join('')}</div>`;
+  let h = `<button class="btn small" type="button" data-act="inicio">‹ Inicio</button><h1 style="margin-top:10px">Envíos</h1>
+    <p class="lead">Las revisiones se envían solas cuando hay señal. Se borran del teléfono solo cuando el servidor confirma que llegaron completas.</p>`;
+  if (S.pendientes.length) h += `<button class="btn primary" type="button" data-act="enviar" ${ENVIO.activo ? 'disabled' : ''} style="width:100%;margin-bottom:6px">${ENVIO.activo ? 'Enviando…' : S.online ? 'Enviar ahora' : 'Reintentar ahora'}</button>
+    ${!S.online && !ENVIO.activo ? '<p class="lead" style="font-size:.85rem;margin:0 0 12px">Sin señal. Se enviará solo al reconectar.</p>' : '<div style="height:6px"></div>'}`;
+  h += `<h3>Por enviar (${S.pendientes.length})</h3>`;
+  if (!S.pendientes.length) h += `<div class="empty" style="margin-top:8px">Todo enviado. No hay nada pendiente en este teléfono.</div>`;
+  else h += `<div class="list" style="margin-top:8px">${S.pendientes.map(p => { const e = estadoEnvio(p); return `<div class="row">
+    <b>${esc(p.movimiento)} · ${esc(nombreUnidad(p.unidad))}</b><span class="mono" style="font-size:.8rem">${refCorta(p.uuid)}</span>
+    <span class="meta">${esc(p.placas)} · ${fmtKm(p.km)} · ${fmtFecha(p.fechaFin)} · ${totalFotos(p)} foto(s)</span>
+    <span class="meta"><span class="st ${e.cls}" style="white-space:normal">${esc(e.t)}</span></span>
+    <span class="acts"><button class="btn small" type="button" data-ver="${p.uuid}">Ver</button>
+    <button class="btn small${S.confirmDescartar === p.uuid ? ' danger go' : ' danger'}" type="button" data-descartar="${p.uuid}" ${ENVIO.activo && ENVIO.actual === p.uuid ? 'disabled' : ''}>${S.confirmDescartar === p.uuid ? '¿Seguro? Toca otra vez' : 'Descartar'}</button></span>
+    ${S.confirmDescartar === p.uuid ? `<span class="meta" style="color:var(--bad)">Se borrará del teléfono con sus fotos y no se podrá recuperar.${p.sync && p.sync.folio ? ' Ya tiene folio ' + esc(p.sync.folio) + ': en el Sheet quedará como "Recibiendo" (incompleta).' : ''}</span>` : ''}</div>`; }).join('')}</div>`;
+  const env = S.enviadas || [];
+  if (env.length) h += `<h3 style="margin-top:18px">Enviadas desde este teléfono</h3><div class="list" style="margin-top:8px">${env.slice(0, 15).map(x => `<div class="row">
+    <b>${esc(x.folio)}</b><span class="st disp">${esc(x.estado || 'Recibida')}</span>
+    <span class="meta">${esc(x.movimiento)} · ${esc(x.unidad)} · capturada ${fmtFecha(x.fechaFin)} · enviada ${fmtFecha(x.enviado)}</span></div>`).join('')}</div>`;
   return h;
 }
 
 function vistaDetalle(p) {
   if (!p) return '';
   const fallas = (p.plantilla || []).filter(q => esHallazgo(q, (p.respuestas[q.id] || {}).valor));
-  return `<button class="btn small" type="button" data-act="pendientes">‹ Por enviar</button>
+  return `<button class="btn small" type="button" data-act="pendientes">‹ Envíos</button>
   <h1 style="margin-top:10px">${esc(p.movimiento)} · ${esc(nombreUnidad(p.unidad))}</h1>
   <p class="lead">Ref. provisional <span class="mono">${refCorta(p.uuid)}</span> · capturada ${fmtFecha(p.fechaFin)}</p>
   <div class="stack"><section class="panel"><dl class="kv">${[['Placas', p.placas], ['Kilometraje', fmtKm(p.km)], ['Combustible', p.combustible], ['Conductor', p.conductor], ['Destino', p.destino], ['Revisó', p.revisor], ['Entrega', p.firmas.entrega.nombre], ['Recibe', p.firmas.recibe.nombre]].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v || '—')}</dd></div>`).join('')}</dl></section>
@@ -445,7 +464,7 @@ function vistaHecho() {
   const p = S.hecho;
   return `<section class="panel" style="text-align:center"><h2>Revisión guardada</h2>
     <p class="lead" style="margin:6px 0">Referencia provisional</p><div class="ref">${refCorta(p.uuid)}</div>
-    <p class="lead" style="margin:12px auto 18px;max-width:40ch">Quedó guardada en el teléfono. Se enviará cuando haya señal; ahí recibirá su folio definitivo.</p>
+    ${(() => { const env = (S.enviadas || []).find(x => x.uuid === p.uuid); return env ? `<p class="lead" style="margin:12px auto 4px">Enviada con folio</p><div class="ref">${esc(env.folio)}</div><p class="lead" style="margin:6px auto 18px">Ya está en el Sheet con su PDF.</p>` : `<p class="lead" style="margin:12px auto 18px;max-width:40ch">${ENVIO.activo ? 'Enviando… ' + esc(ENVIO.progreso) : 'Quedó guardada en el teléfono. Se enviará sola cuando haya señal; ahí recibirá su folio definitivo.'}</p>`; })()}
     <div class="stack"><button class="btn primary big" type="button" data-act="nueva">Nueva revisión</button><button class="btn" type="button" data-act="inicio">Ir al inicio</button></div></section>`;
 }
 
@@ -612,14 +631,153 @@ async function terminar() {
   // Se guarda el texto de cada pregunta tal como se contestó.
   const roles = rolesFirma(R); ['entrega', 'recibe'].forEach(k => { R.firmas[k].rol = roles[k]; });
   R.respuestasFinal = R.plantilla.map(q => ({ id: q.id, seccion: q.seccion, pregunta: q.pregunta, tipo: q.tipo, valor: (R.respuestas[q.id] || {}).valor ?? '', comentario: (R.respuestas[q.id] || {}).comentario || '' }));
+  // Imagen del diagrama con los daños marcados (va en el PDF). Si falla, la revisión se guarda igual.
+  try {
+    const viejos = (await archivosDe(R.uuid)).filter(a => a.slot === 'diagrama'); for (const a of viejos) await DB.del('archivos', a.uuid);
+    const blob = await diagramaPNG(R);
+    await guardarArchivo({ uuid: uuid(), revision: R.uuid, tipo: 'diagrama', slot: 'diagrama', nota: '', blob, mime: 'image/png', ancho: 900, alto: 560, bytes: blob.size, capturado: isoLocal() });
+  } catch (e) { }
   try {
     await moverAPendientes(R);
   } catch (e) { alertaInline('No se pudo guardar en el teléfono. Libera espacio e intenta de nuevo.'); return; }
   S._ultimoRevisor = R.revisor; try { localStorage.setItem('ultimoRevisor', R.revisor); } catch (e) { }
   S.hecho = R; S.R = null; S.vista = 'hecho'; S.intento = false;
   await recargarListas(); render(); window.scrollTo(0, 0);
+  sincronizar(true);
 }
 function alertaInline(t) { const el = $('#saved'); if (el) el.textContent = '⚠ ' + t; }
+
+/* ════════ Envío al servidor ════════ */
+// Tres pasos por revisión: crear (datos) → archivo (uno por foto/firma) → cerrar.
+// Cada paso se puede repetir sin duplicar: el servidor reconoce el UUID.
+const ENVIO = { activo: false, actual: null, progreso: '' };
+const esperaReintento = n => Math.min(30000 * Math.pow(2, Math.max(0, n - 1)), 30 * 60000) * (0.8 + Math.random() * 0.4);
+
+async function sincronizar(forzar) {
+  if (ENVIO.activo || !S.token || !SCRIPT_URL || /PEGA_AQUI/.test(SCRIPT_URL)) return;
+  if (S.online === false && !forzar) return;
+  ENVIO.activo = true; pintarEstado();
+  try {
+    const lista = (await DB.all('pendientes')).sort((a, b) => a.fechaFin.localeCompare(b.fechaFin));
+    for (const p of lista) {
+      p.sync = p.sync || { intentos: 0 };
+      if (!forzar && p.sync.siguiente && Date.now() < p.sync.siguiente) continue;
+      try { await enviarUna(p); }
+      catch (e) {
+        if (e.token) { S.tokenMalo = true; break; }
+        p.sync.intentos = (p.sync.intentos || 0) + 1; p.sync.error = e.message || 'error'; p.sync.siguiente = Date.now() + esperaReintento(p.sync.intentos);
+        if (await DB.get('pendientes', p.uuid)) await DB.put('pendientes', p);
+        if (e.red) { S.online = false; break; }   // sin señal: no tiene caso seguir con las demás
+      }
+    }
+  } finally {
+    ENVIO.activo = false; ENVIO.actual = null; ENVIO.progreso = '';
+    await recargarListas();
+    if (['inicio', 'pendientes', 'hecho'].includes(S.vista)) rerender();
+  }
+}
+function progreso(t) {
+  ENVIO.progreso = t; pintarEstado();
+  if (S.vista === 'pendientes' || S.vista === 'hecho') rerender();
+}
+async function postServidor(cuerpo, ms) {
+  const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), ms || 90000);
+  let r;
+  try { r = await fetch(SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ token: S.token }, cuerpo)), signal: ctrl.signal }); }
+  catch (e) { const err = new Error('sin señal o se cortó la conexión'); err.red = true; throw err; }
+  finally { clearTimeout(tm); }
+  let j; try { j = await r.json(); } catch (e) { throw new Error('respuesta inválida del servidor'); }
+  if (j && j.error === 'token') { const err = new Error('token'); err.token = true; throw err; }
+  return j;
+}
+async function archivosDe(revUuid) {
+  const db = await DB.open();
+  return new Promise((res, rej) => {
+    const q = db.transaction('archivos').objectStore('archivos').index('revision').getAll(IDBKeyRange.only(revUuid));
+    q.onsuccess = () => res(q.result || []); q.onerror = () => rej(q.error);
+  });
+}
+function paqueteRevision(p, archivos) {
+  return {
+    uuid: p.uuid, version: p.version, movimiento: p.movimiento, placas: p.placas, unidad: p.unidad, revisor: p.revisor, codigo: p.codigo,
+    km: p.km, combustible: p.combustible, conductor: p.conductor, destino: p.destino,
+    salida: p.salida ? { ref: p.salida.ref, folio: p.salida.folio } : null,
+    danos: p.danos, llantas: Object.fromEntries(Object.entries(p.llantas || {}).map(([k, l]) => [k, { estado: l.estado }])),
+    respuestasFinal: p.respuestasFinal || [], obs: p.obs, fotos: p.fotos || {},
+    firmas: Object.fromEntries(['entrega', 'recibe'].map(k => { const f = (p.firmas || {})[k] || {}; return [k, { nombre: f.nombre || '', archivo: f.archivo || null, fecha: f.fecha || null, rol: f.rol || '' }]; })),
+    fechaInicio: p.fechaInicio, fechaFin: p.fechaFin,
+    archivos: archivos.map(a => ({ uuid: a.uuid, slot: a.slot, tipo: a.tipo, mime: a.mime, nota: a.nota || '', capturado: a.capturado, bytes: a.bytes })),
+    dispositivo: (navigator.userAgent || '').slice(0, 140)
+  };
+}
+const aBase64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = () => rej(fr.error); fr.readAsDataURL(blob); });
+async function miniatura(blob) {
+  try {
+    const bm = await createImageBitmap(blob); const k = Math.min(1, 480 / Math.max(bm.width, bm.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bm.width * k); c.height = Math.round(bm.height * k);
+    c.getContext('2d').drawImage(bm, 0, 0, c.width, c.height); if (bm.close) bm.close();
+    return await aBase64(await new Promise(r => c.toBlob(r, 'image/jpeg', 0.6)));
+  } catch (e) { return undefined; }
+}
+async function enviarUna(p) {
+  ENVIO.actual = p.uuid;
+  const etiqueta = `${p.movimiento} ${nombreUnidad(p.unidad)}`;
+  const archivos = await archivosDe(p.uuid);
+  if (!p.sync.folio) {
+    progreso(`${etiqueta}: enviando datos…`);
+    const j = await postServidor({ accion: 'crear', revision: paqueteRevision(p, archivos) }, 60000);
+    if (!j.ok) throw new Error(j.mensaje || 'el servidor no aceptó los datos');
+    p.sync.folio = j.folio; p.sync.faltan = j.faltan || archivos.map(a => a.uuid);
+    await DB.put('pendientes', p);
+  }
+  for (let intento = 0; intento < 2; intento++) {
+    const faltan = (p.sync.faltan || []).slice();
+    for (let i = 0; i < faltan.length; i++) {
+      const a = archivos.find(x => x.uuid === faltan[i]);
+      if (!a) throw new Error('falta una foto en el teléfono');
+      progreso(`${etiqueta}: archivo ${i + 1} de ${faltan.length}…`);
+      const blob = a.blob || (a.bytesData ? new Blob([a.bytesData], { type: a.mime }) : null);
+      if (!blob) throw new Error('foto dañada en el teléfono');
+      const j = await postServidor({ accion: 'archivo', revision: p.uuid, uuid: a.uuid, slot: a.slot, tipo: a.tipo, mime: a.mime, nota: a.nota || '', capturado: a.capturado, data: await aBase64(blob), mini: a.tipo === 'foto' ? await miniatura(blob) : undefined });
+      if (!j.ok) throw new Error(j.mensaje || 'el servidor no aceptó una foto');
+      p.sync.faltan = p.sync.faltan.filter(u => u !== a.uuid);
+      await DB.put('pendientes', p);
+    }
+    progreso(`${etiqueta}: confirmando…`);
+    const c = await postServidor({ accion: 'cerrar', revision: p.uuid }, 120000);
+    if (c.ok) { await confirmarEnviada(p, c); return; }
+    if (c.error !== 'faltan') throw new Error(c.mensaje || 'el servidor no pudo cerrar la revisión');
+    p.sync.faltan = c.faltan || []; await DB.put('pendientes', p);
+  }
+  throw new Error('el servidor sigue sin recibir todos los archivos');
+}
+// Solo aquí se borra la copia del teléfono: el servidor ya confirmó.
+async function confirmarEnviada(p, c) {
+  const env = (await DB.meta('enviadas')) || [];
+  env.unshift({ uuid: p.uuid, folio: c.folio, estado: c.estado || 'Recibida', movimiento: p.movimiento, unidad: nombreUnidad(p.unidad), placas: p.placas, fechaFin: p.fechaFin, enviado: isoLocal() });
+  await DB.meta('enviadas', env.slice(0, 50));
+  await DB.del('pendientes', p.uuid);
+  await borrarArchivosDe(p.uuid);
+}
+
+/* Diagrama de carrocería como imagen PNG para el PDF (se hace en el teléfono, sin señal). */
+const COLORES_PDF = { 'var(--body-fill)': '#f6f8fa', 'var(--ink)': '#18212c', 'var(--glass)': '#cfdbe6', 'var(--tire)': '#2a2f36', 'var(--steel)': '#2f4458', 'var(--card)': '#ffffff' };
+async function diagramaPNG(R) {
+  const prev = R.salida ? (R.salida.danos || []) : [];
+  const c = document.createElement('canvas'); c.width = 900; c.height = 560;
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 900, 560);
+  const cajas = { frente: [0, 0, 440, 293], trasera: [460, 0, 440, 293], lat_izq: [0, 330, 440, 168], lat_der: [460, 330, 440, 168] };
+  for (const vw of VIEWS) {
+    let svg = diagram(vw, R.danos, prev).replace('<svg ', `<svg xmlns="http://www.w3.org/2000/svg" width="${vw.vb[2]}" height="${vw.vb[3]}" `);
+    Object.entries(COLORES_PDF).forEach(([k, v]) => { svg = svg.split(k).join(v); });
+    const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    await img.decode();
+    const [x, y, w, h] = cajas[vw.k];
+    ctx.fillStyle = '#5b6876'; ctx.font = 'bold 15px Arial'; ctx.fillText(vw.t + (vw.hint ? '  ' + vw.hint : ''), x + 4, y + 18);
+    ctx.drawImage(img, x, y + 24, w, h);
+  }
+  return await new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('png')), 'image/png'));
+}
 
 /* ════════ Fotos ════════ */
 // Cada foto vive en IndexedDB ("archivos") con su propio UUID. El borrador solo guarda la lista de UUID por casilla.
@@ -833,7 +991,13 @@ document.addEventListener('click', async e => {
   const R = S.R, d = b.dataset;
   if (d.act === 'nueva') { nuevaRevision(S.unidadQR); S.unidadQR = null; return; }
   if (d.act === 'inicio') { S.vista = 'inicio'; S.confirmDel = null; await recargarListas(); render(); window.scrollTo(0, 0); return; }
-  if (d.act === 'pendientes') { S.vista = 'pendientes'; render(); window.scrollTo(0, 0); return; }
+  if (d.act === 'pendientes') { S.vista = 'pendientes'; S.confirmDescartar = null; render(); window.scrollTo(0, 0); return; }
+  if (d.act === 'enviar') { (await DB.all('pendientes')).forEach(p => { if (p.sync) { p.sync.siguiente = 0; DB.put('pendientes', p); } }); revisarRed(true); setTimeout(() => sincronizar(true), 300); return; }
+  if (d.descartar) {
+    if (S.confirmDescartar !== d.descartar) { S.confirmDescartar = d.descartar; rerender(); return; }
+    if (ENVIO.activo && ENVIO.actual === d.descartar) return;
+    await DB.del('pendientes', d.descartar); await borrarArchivosDe(d.descartar); S.confirmDescartar = null; await recargarListas(); rerender(); return;
+  }
   if (d.act === 'scan') { $('#qrFile').click(); return; }
   if (d.act === 'token') {
     const v = ($('#tokenIn').value || '').trim(); if (!v) return;
